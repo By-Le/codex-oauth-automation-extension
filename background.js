@@ -112,6 +112,9 @@ function broadcastDataUpdate(payload) {
 async function setEmailState(email) {
   await setState({ email });
   broadcastDataUpdate({ email });
+  if (email) {
+    await resumeAutoRunIfWaitingForEmail();
+  }
 }
 
 async function setPasswordState(password) {
@@ -1081,6 +1084,25 @@ let autoRunCurrentRun = 0;
 let autoRunTotalRuns = 1;
 let autoRunAttemptRun = 0;
 
+async function resumeAutoRunIfWaitingForEmail(options = {}) {
+  const { silent = false } = options;
+  const state = await getState();
+  if (!state.email || !isAutoRunPausedState(state)) {
+    return false;
+  }
+
+  if (resumeWaiter) {
+    if (!silent) {
+      await addLog('邮箱已就绪，自动继续后续步骤...', 'info');
+    }
+    resumeWaiter.resolve();
+    resumeWaiter = null;
+    return true;
+  }
+
+  return false;
+}
+
 // Outer loop: keep retrying until the target number of successful runs is reached.
 async function autoRunLoop(totalRuns, options = {}) {
   if (autoRunActive) {
@@ -1268,9 +1290,15 @@ async function autoRunLoop(totalRuns, options = {}) {
   clearStopRequest();
 }
 
-function waitForResume() {
+async function waitForResume() {
+  throwIfStopped();
+  const state = await getState();
+  if (state.email) {
+    await addLog('邮箱已就绪，自动继续后续步骤...', 'info');
+    return;
+  }
+
   return new Promise((resolve, reject) => {
-    throwIfStopped();
     resumeWaiter = { resolve, reject };
   });
 }
@@ -1282,10 +1310,7 @@ async function resumeAutoRun() {
     await addLog('无法继续：当前没有邮箱地址，请先在侧边栏填写邮箱。', 'error');
     return;
   }
-  if (resumeWaiter) {
-    resumeWaiter.resolve();
-    resumeWaiter = null;
-  }
+  await resumeAutoRunIfWaitingForEmail({ silent: true });
 }
 
 // ============================================================
